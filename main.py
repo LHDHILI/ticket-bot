@@ -77,37 +77,37 @@ class ControlView(View):
         super().__init__(timeout=None)
 
     # 👑 CLAIM
-    @discord.ui.button(label="👑 استلام التكت", style=discord.ButtonStyle.green)
-    async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
+@discord.ui.button(label="👑 استلام التكت", style=discord.ButtonStyle.green)
+async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        channel = interaction.channel
+    channel = interaction.channel
 
-        if channel.id in claimed_tickets:
-            await interaction.response.send_message("❌ التكت مستلم بالفعل", ephemeral=True)
-            return
+    if channel.id in claimed_tickets:
+        await interaction.response.send_message("❌ التكت مستلم بالفعل", ephemeral=True)
+        return
 
-        claimed_tickets[channel.id] = interaction.user.id
-        claim_time[channel.id] = datetime.datetime.utcnow()
+    claimed_tickets[channel.id] = interaction.user.id
+    claim_time[channel.id] = datetime.datetime.utcnow()
 
-        for role in interaction.guild.roles:
-            if role.name != "@everyone" and role.name not in ADMIN_ROLES:
-                await channel.set_permissions(role, send_messages=False)
+    # 🔐 قفل الكتابة
+    for role in interaction.guild.roles:
+        if role.name != "@everyone" and role.name not in ADMIN_ROLES:
+            await channel.set_permissions(role, send_messages=False)
 
-        await channel.set_permissions(interaction.user, send_messages=True)
+    await channel.set_permissions(interaction.user, send_messages=True)
 
-        embed = discord.Embed(
-            title="👑 تم استلام التكت",
-            description=(
-                f"👤 المستلم: {interaction.user.mention}\n"
-                f"⏱ وقت الاستلام: {claim_time[channel.id].strftime('%Y-%m-%d %H:%M:%S')}"
-            ),
-            color=0x00ff99
-        )
+    # 🧠 مهم: قفل الزر مباشرة
+    button.disabled = True
+    await interaction.message.edit(view=self)
 
-        await channel.send(embed=embed)
-        await channel.send(view=UnclaimView())
+    embed = discord.Embed(
+        title="👑 تم استلام التكت",
+        description=f"👤 {interaction.user.mention}",
+        color=0x00ff99
+    )
 
-        await interaction.response.send_message("تم الاستلام بنجاح", ephemeral=True)
+    await interaction.response.send_message("تم الاستلام بنجاح", ephemeral=True)
+    await channel.send(embed=embed)
 
     # 🔒 CLOSE
     @discord.ui.button(label="🔒 إغلاق التكت", style=discord.ButtonStyle.red)
