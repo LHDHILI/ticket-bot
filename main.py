@@ -1,15 +1,17 @@
-import discord
+impoimport discord
 from discord.ext import commands
 from discord.ui import View, Modal
 import io
-from datetime import datetime
+import datetime
+import os
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ========= STORAGE =========
 open_tickets = {}
-claimed_tickets = {}
+claimed_tickets = {}   # channel_id -> user_id
+claim_time = {}        # channel_id -> datetime
 
 LOG_CHANNEL = "ticket-logs"
 ADMIN_ROLES = ["Admin", "Supervisor", "Leader"]
@@ -18,7 +20,6 @@ ADMIN_ROLES = ["Admin", "Supervisor", "Leader"]
 @bot.event
 async def on_ready():
     print("🔥 BOT ONLINE")
-
 
 # ========= MODAL =========
 class SmartTicketForm(Modal):
@@ -70,14 +71,13 @@ class SmartTicketForm(Modal):
             ephemeral=True
         )
 
-
 # ========= CONTROL SYSTEM =========
 class ControlView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    # 👑 CLAIM + LOCK
-    @discord.ui.button(label="👑 Claim", style=discord.ButtonStyle.blurple)
+    # 👑 CLAIM
+    @discord.ui.button(label="👑 استلام التكت", style=discord.ButtonStyle.green)
     async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
 
         channel = interaction.channel
@@ -87,20 +87,30 @@ class ControlView(View):
             return
 
         claimed_tickets[channel.id] = interaction.user.id
+        claim_time[channel.id] = datetime.datetime.utcnow()
 
-        # 🔐 قفل الكتابة للجميع
         for role in interaction.guild.roles:
-            if role.name not in ADMIN_ROLES:
+            if role.name != "@everyone" and role.name not in ADMIN_ROLES:
                 await channel.set_permissions(role, send_messages=False)
 
-        # السماح للمستلم
         await channel.set_permissions(interaction.user, send_messages=True)
 
-        await channel.send(f"👑 تم الاستلام بواسطة {interaction.user.mention}")
-        await interaction.response.send_message("تم الاستلام + تم قفل التكت", ephemeral=True)
+        embed = discord.Embed(
+            title="👑 تم استلام التكت",
+            description=(
+                f"👤 المستلم: {interaction.user.mention}\n"
+                f"⏱ وقت الاستلام: {claim_time[channel.id].strftime('%Y-%m-%d %H:%M:%S')}"
+            ),
+            color=0x00ff99
+        )
 
-    # 🔒 CLOSE + TRANSCRIPT
-    @discord.ui.button(label="🔒 Close", style=discord.ButtonStyle.red)
+        await channel.send(embed=embed)
+        await channel.send(view=UnclaimView())
+
+        await interaction.response.send_message("تم الاستلام بنجاح", ephemeral=True)
+
+    # 🔒 CLOSE
+    @discord.ui.button(label="🔒 إغلاق التكت", style=discord.ButtonStyle.red)
     async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
 
         if not any(r.name in ADMIN_ROLES for r in interaction.user.roles):
@@ -115,21 +125,13 @@ class ControlView(View):
 
         html = f"""
         <html>
-        <head>
-        <style>
-        body {{ background:#1e1e1e; color:white; font-family:Arial; }}
-        .msg {{ padding:6px; border-bottom:1px solid #333; }}
-        .a {{ color:#00bfff; font-weight:bold; }}
-        </style>
-        </head>
-        <body>
-        <h2>Ticket Transcript - {channel.name}</h2>
-        <p>{datetime.utcnow()}</p>
+        <body style="background:#1e1e1e;color:white;font-family:Arial">
+        <h2>📜 Transcript - {channel.name}</h2>
         <hr>
         """
 
         for m in messages:
-            html += f"<div class='msg'><span class='a'>{m.author}</span>: {m.content}</div>"
+            html += f"<p><b>{m.author}</b>: {m.content}</p>"
 
         html += "</body></html>"
 
@@ -140,11 +142,56 @@ class ControlView(View):
             await log.send(file=discord.File(file, "transcript.html"))
 
         claimed_tickets.pop(channel.id, None)
-        open_tickets.pop(interaction.user.id, None)
+        claim_time.pop(channel.id, None)
 
-        await interaction.response.send_message("🔒 يتم الغلق...", ephemeral=True)
+        await interaction.response.send_message("🔒 يتم الإغلاق...", ephemeral=True)
         await channel.delete()
 
+# ========= UNCLAIM =========
+class UnclaimView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🔄 التخلي عن الاستلام", style=discord.ButtonStyle.red)
+    async def unclaim(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        channel = interaction.channel
+
+        if channel.id not in claimed_tickets:
+            await interaction.response.send_message("❌ التكت موش مستلم", ephemeral=True)
+            return
+
+        if claimed_tickets[channel.id] != interaction.user.id:
+            await interaction.response.send_message("❌ الزر خاص بالمستلم فقط", ephemeral=True)
+            return
+
+        start = claim_time.get(channel.id)
+        now = datetime.datetime.utcnow()
+
+        duration = "غير معروف"
+        if start:
+            diff = now - start
+            duration = f"{int(diff.total_seconds() // 60)} دقيقة"
+
+        claimed_tickets.pop(channel.id, None)
+        claim_time.pop(channel.id, None)
+
+        for role in interaction.guild.roles:
+            if role.name != "@everyone":
+                await channel.set_permissions(role, send_messages=True)
+
+        embed = discord.Embed(
+            title="🔄 تم التخلي عن التكت",
+            description=(
+                f"👤 السابق: {interaction.user.mention}\n"
+                f"⏱ وقت التخلي: {now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"⏳ مدة الاستلام: {duration}"
+            ),
+            color=0xffcc00
+        )
+
+        await channel.send(embed=embed)
+        await interaction.response.send_message("تم التخلي", ephemeral=True)
 
 # ========= PANEL =========
 class TicketPanel(View):
@@ -182,6 +229,8 @@ class TicketPanel(View):
     @discord.ui.button(label="📩 إعادة خدمة", style=discord.ButtonStyle.primary)
     async def b8(self, interaction, button):
         await interaction.response.send_modal(SmartTicketForm("إعادة خدمة"))
+
+
 
 
 # ========= PANEL COMMAND =========
