@@ -205,5 +205,6 @@ async def panel(ctx):
 
     await ctx.send(embed=embed, view=TicketPanel())
 
-
+import os
+bot.run(os.getenv("TOKEN"))
 
