@@ -20,6 +20,7 @@ ADMIN_ROLES = ["Admin", "Supervisor", "Leader"]
 @bot.event
 async def on_ready():
     print("🔥 BOT ONLINE")
+    bot.add_view(ControlView())
 
 # ========= MODAL =========
 class SmartTicketForm(Modal):
