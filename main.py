@@ -206,5 +206,4 @@ async def panel(ctx):
     await ctx.send(embed=embed, view=TicketPanel())
 
 
-# ================= RUN =================
-bot.run("MTQ1OTY4NzAzODY3MTUxOTkwOA.GJOk4s.AuiawzftLH6d0x4XIztyLzdh7E2G72E0LRQHL8")
+
