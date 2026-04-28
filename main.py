@@ -10,17 +10,21 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ========= STORAGE =========
 open_tickets = {}
-claimed_tickets = {}   # channel_id -> user_id
-claim_time = {}        # channel_id -> datetime
+claimed_tickets = {}
+claim_time = {}
 
 LOG_CHANNEL = "ticket-logs"
-ADMIN_ROLES = ["Admin", "Supervisor", "Leader"]
+ADMIN_ROLES = ["〢◈ King"]
 
 # ========= READY =========
 @bot.event
 async def on_ready():
     print("🔥 BOT ONLINE")
+
+    # تثبيت الأزرار بعد restart
     bot.add_view(ControlView())
+    bot.add_view(TicketPanel())
+    bot.add_view(UnclaimView())
 
 # ========= MODAL =========
 class SmartTicketForm(Modal):
@@ -29,13 +33,58 @@ class SmartTicketForm(Modal):
         super().__init__(title=f"📋 {reason}")
         self.reason = reason
 
-        self.q1 = discord.ui.TextInput(label="الاسم")
-        self.q2 = discord.ui.TextInput(label="تفاصيل الطلب")
-        self.q3 = discord.ui.TextInput(label="شرح إضافي", style=discord.TextStyle.paragraph)
+        # 🔥 أسئلة ذكية حسب نوع التكت
+
+        if reason == "شكوى على مسعف":
+            self.q1 = discord.ui.TextInput(label="👤 اسمك داخل المقاطعة")
+            self.q2 = discord.ui.TextInput(label="📛 اسم المسعف او كوده الميداني")
+            self.q3 = discord.ui.TextInput(label="📛 سبب الشكوى")
+            self.q4 = discord.ui.TextInput(label="  رابط التصوير")
+               
+
+
+        elif reason ==  "طلب استقالة":
+            self.q1 = discord.ui.TextInput(label="👤 اسمك داخل المقاطعة")
+            self.q2 = discord.ui.TextInput(label="📅 سبب الاستقالة")
+            self.q3 = discord.ui.TextInput( label="📝 الرتبة الحالية")
+               
+          
+
+        elif reason == "تظلم من ترقية":
+            self.q1 = discord.ui.TextInput(label="👤 اسمك داخل المقاطعة")
+            self.q2 = discord.ui.TextInput(label="📊 سبب التظلم")
+            self.q3 = discord.ui.TextInput(
+                label="📝 شرح مفصل",
+                style=discord.TextStyle.paragraph
+            )
+
+        elif reason == "مسؤولين التوظيف":
+            self.q1 = discord.ui.TextInput(label="👤 اسمك داخل المقاطعة")
+            self.q2 = discord.ui.TextInput(label="🎓 سبب التواصل")
+            self.q3 = discord.ui.TextInput(
+                label="📝 لماذا تريد الانضمام؟",
+                style=discord.TextStyle.paragraph
+            )
+
+        elif reason == "قيادة الهلال الأحمر":
+            self.q1 = discord.ui.TextInput(label="👤 اسمك داخل المقاطعة")
+            self.q2 = discord.ui.TextInput(label="📌 سبب التواصل مع القيادة")
+            self.q3 = discord.ui.TextInput(label="📝 التفاصيل")
+               
+          
+        else:
+            # fallback
+            self.q1 = discord.ui.TextInput(label="👤 اسمك داخل المقاطعة")
+            self.q2 = discord.ui.TextInput(label="📌 تفاصيل الطلب")
+            self.q3 = discord.ui.TextInput(
+                label="📝 شرح إضافي",
+                style=discord.TextStyle.paragraph
+            )
 
         self.add_item(self.q1)
         self.add_item(self.q2)
         self.add_item(self.q3)
+        self.add_item(self.q4)
 
     async def on_submit(self, interaction: discord.Interaction):
         guild = interaction.guild
@@ -58,11 +107,19 @@ class SmartTicketForm(Modal):
 
         open_tickets[member.id] = channel.id
 
+        embed = discord.Embed(
+            title=f"🎫 {self.reason}",
+            description="يرجى انتظار الرد من الإدارة 🚑",
+            color=0x2b2d31
+        )
+
+        embed.add_field(name="👤 الاسم", value=self.q1.value, inline=False)
+        embed.add_field(name="📌 التفاصيل", value=self.q2.value, inline=False)
+        embed.add_field(name="📝 الشرح", value=self.q3.value, inline=False)
+
         await channel.send(
-            f"🎫 **{self.reason}**\n\n"
-            f"👤 {self.q1.value}\n"
-            f"📌 {self.q2.value}\n"
-            f"📝 {self.q3.value}"
+            content=f"السلام عليكم {member.mention}",
+            embed=embed
         )
 
         await channel.send(view=ControlView())
@@ -72,68 +129,66 @@ class SmartTicketForm(Modal):
             ephemeral=True
         )
 
-# ========= CONTROL SYSTEM =========
+# ========= CONTROL =========
 class ControlView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
     # 👑 CLAIM
-@discord.ui.button(label="👑 استلام التكت", style=discord.ButtonStyle.green)
-async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="👑 استلام", style=discord.ButtonStyle.green)
+    async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-    channel = interaction.channel
+        # ❌ منع صاحب التكت من الاستلام
+        if interaction.user.id in open_tickets and open_tickets[interaction.user.id] == interaction.channel.id:
+            await interaction.response.send_message("❌ لا يمكنك استلام تكتك", ephemeral=True)
+            return
 
-    if channel.id in claimed_tickets:
-        await interaction.response.send_message("❌ التكت مستلم بالفعل", ephemeral=True)
-        return
+        await interaction.response.defer(ephemeral=True)
+        channel = interaction.channel
 
-    claimed_tickets[channel.id] = interaction.user.id
-    claim_time[channel.id] = datetime.datetime.utcnow()
+        if channel.id in claimed_tickets:
+            await interaction.followup.send("❌ التكت مستلم بالفعل", ephemeral=True)
+            return
 
-    # 🔐 قفل الكتابة
-    for role in interaction.guild.roles:
-        if role.name != "@everyone" and role.name not in ADMIN_ROLES:
-            await channel.set_permissions(role, send_messages=False)
+        claimed_tickets[channel.id] = interaction.user.id
+        claim_time[channel.id] = datetime.datetime.utcnow()
 
-    await channel.set_permissions(interaction.user, send_messages=True)
+        # 🔒 قفل الكتابة لغير الإدارة
+        for role in interaction.guild.roles:
+            if role.name != "@everyone" and role.name not in ADMIN_ROLES:
+                await channel.set_permissions(role, send_messages=False)
 
-    # 🧠 مهم: قفل الزر مباشرة
-    button.disabled = True
-    await interaction.message.edit(view=self)
+        # السماح للمستلم فقط
+        await channel.set_permissions(interaction.user, send_messages=True)
 
-    embed = discord.Embed(
-        title="👑 تم استلام التكت",
-        description=f"👤 {interaction.user.mention}",
-        color=0x00ff99
-    )
+        # تعطيل زر الاستلام
+        button.disabled = True
+        await interaction.message.edit(view=self)
 
-    await interaction.response.send_message("تم الاستلام بنجاح", ephemeral=True)
-    await channel.send(embed=embed)
+        await channel.send(f"👑 تم الاستلام بواسطة {interaction.user.mention}")
+        await interaction.followup.send("تم الاستلام", ephemeral=True)
 
-    # 🔒 CLOSE
-    @discord.ui.button(label="🔒 إغلاق التكت", style=discord.ButtonStyle.red)
+        # 🔄 زر التخلي
+        await channel.send(view=UnclaimView())
+
+    # 🔒 CLOSE (Lock فقط)
+    @discord.ui.button(label="🔒 اغلاق التكت", style=discord.ButtonStyle.gray)
     async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
 
-        if not any(r.name in ADMIN_ROLES for r in interaction.user.roles):
+        if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("❌ ليس لديك صلاحية", ephemeral=True)
             return
 
         channel = interaction.channel
         guild = interaction.guild
 
+        # 📜 Transcript (اختياري خليته كما هو)
         messages = [m async for m in channel.history(limit=200)]
         messages.reverse()
 
-        html = f"""
-        <html>
-        <body style="background:#1e1e1e;color:white;font-family:Arial">
-        <h2>📜 Transcript - {channel.name}</h2>
-        <hr>
-        """
-
+        html = "<html><body style='background:#1e1e1e;color:white;'>"
         for m in messages:
             html += f"<p><b>{m.author}</b>: {m.content}</p>"
-
         html += "</body></html>"
 
         file = io.BytesIO(html.encode())
@@ -142,58 +197,30 @@ async def claim(self, interaction: discord.Interaction, button: discord.ui.Butto
         if log:
             await log.send(file=discord.File(file, "transcript.html"))
 
-        claimed_tickets.pop(channel.id, None)
-        claim_time.pop(channel.id, None)
+        # 🔒 قفل التكت (موش حذف)
+        await channel.set_permissions(guild.default_role, send_messages=False)
 
-        await interaction.response.send_message("🔒 يتم الإغلاق...", ephemeral=True)
-        await channel.delete()
+        await interaction.response.send_message("🔒 تم إغلاق التكت", ephemeral=True)
+        await channel.send("🔒 تم إغلاق التكت، لا يمكن الكتابة الآن")
 
-# ========= UNCLAIM =========
-class UnclaimView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
+        # 🗑️ زر الحذف يظهر بعد الإغلاق
+        await channel.send(view=DeleteView())
+        class DeleteView(View):
+          def __init__(self):
+            super().__init__(timeout=None)
 
-    @discord.ui.button(label="🔄 التخلي عن الاستلام", style=discord.ButtonStyle.red)
-    async def unclaim(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="🗑️ حذف التكت", style=discord.ButtonStyle.red)
+    async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
 
         channel = interaction.channel
 
-        if channel.id not in claimed_tickets:
-            await interaction.response.send_message("❌ التكت موش مستلم", ephemeral=True)
+        # ✅ فقط الأدمن أو المستلم
+        if not interaction.user.guild_permissions.administrator and claimed_tickets.get(channel.id) != interaction.user.id:
+            await interaction.response.send_message("❌ ليس لديك صلاحية", ephemeral=True)
             return
 
-        if claimed_tickets[channel.id] != interaction.user.id:
-            await interaction.response.send_message("❌ الزر خاص بالمستلم فقط", ephemeral=True)
-            return
-
-        start = claim_time.get(channel.id)
-        now = datetime.datetime.utcnow()
-
-        duration = "غير معروف"
-        if start:
-            diff = now - start
-            duration = f"{int(diff.total_seconds() // 60)} دقيقة"
-
-        claimed_tickets.pop(channel.id, None)
-        claim_time.pop(channel.id, None)
-
-        for role in interaction.guild.roles:
-            if role.name != "@everyone":
-                await channel.set_permissions(role, send_messages=True)
-
-        embed = discord.Embed(
-            title="🔄 تم التخلي عن التكت",
-            description=(
-                f"👤 السابق: {interaction.user.mention}\n"
-                f"⏱ وقت التخلي: {now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                f"⏳ مدة الاستلام: {duration}"
-            ),
-            color=0xffcc00
-        )
-
-        await channel.send(embed=embed)
-        await interaction.response.send_message("تم التخلي", ephemeral=True)
-
+        await interaction.response.send_message("🗑️ يتم حذف التكت...", ephemeral=True)
+        await channel.delete()
 # ========= PANEL =========
 class TicketPanel(View):
     def __init__(self):
@@ -215,26 +242,23 @@ class TicketPanel(View):
     async def b4(self, interaction, button):
         await interaction.response.send_modal(SmartTicketForm("الشؤون الإدارية"))
 
-    @discord.ui.button(label="📩 التوظيف", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="📩 مسؤولين التوظيف", style=discord.ButtonStyle.primary)
     async def b5(self, interaction, button):
-        await interaction.response.send_modal(SmartTicketForm("التوظيف"))
+        await interaction.response.send_modal(SmartTicketForm("مسؤولين التوظيف"))
 
     @discord.ui.button(label="📩 تظلم من ترقية", style=discord.ButtonStyle.primary)
     async def b6(self, interaction, button):
         await interaction.response.send_modal(SmartTicketForm("تظلم من ترقية"))
 
-    @discord.ui.button(label="📩 استقالة", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="📩 طلب استقالة", style=discord.ButtonStyle.primary)
     async def b7(self, interaction, button):
-        await interaction.response.send_modal(SmartTicketForm("استقالة"))
+        await interaction.response.send_modal(SmartTicketForm("طلب استقالة"))
 
     @discord.ui.button(label="📩 إعادة خدمة", style=discord.ButtonStyle.primary)
     async def b8(self, interaction, button):
         await interaction.response.send_modal(SmartTicketForm("إعادة خدمة"))
 
-
-
-
-# ========= PANEL COMMAND =========
+# ========= COMMAND =========
 @bot.command()
 async def panel(ctx):
 
@@ -254,7 +278,5 @@ async def panel(ctx):
     embed.set_footer(text="🚑 الهلال الأحمر | Ticket System", icon_url="https://cdn.discordapp.com/attachments/1426529602423230524/1498424312594567390/Square_City.png?ex=69f11be3&is=69efca63&hm=38c77779136a05ae8d6655abe8e9b435da1496819fdab4e52ce22c93409d575b")
 
     await ctx.send(embed=embed, view=TicketPanel())
-
 import os
 bot.run(os.getenv("TOKEN"))
-
